@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Alert sinks reject invalid `min_severity` values at construction with a
+  `ValueError` listing the supported levels (#815).
 - `WebhookSink` and `ConsoleSink` now include the risk's explicit or derived
   severity in their JSON payloads (#772).
 - `DiagnosticMetrics.record_timing` rejects negative and non-finite samples

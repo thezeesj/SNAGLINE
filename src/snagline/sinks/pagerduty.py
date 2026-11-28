@@ -45,6 +45,7 @@ from snagline.sinks.base import (
     describe_failure,
     format_sink_repr,
     make_post_pool,
+    validate_min_severity,
 )
 
 logger = logging.getLogger("snagline")
@@ -82,6 +83,7 @@ class PagerDutySink:
         self._key = routing_key
         self._timeout = timeout
         self._source = source
+        validate_min_severity(min_severity)
         self._min = min_severity
         # A private in-flight pool: a stalled PagerDuty must only exhaust its
         # own delivery budget, not the one every other network sink draws from
