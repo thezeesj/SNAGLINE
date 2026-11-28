@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,3 +113,183 @@ def test_load_security_policy_json(tmp_path: Path):
     schema = load_security_policy(file_path)
     assert schema.name == "json_policy"
     assert schema.allowed_tools == ["Grep"]
+
+
+def test_reject_conflicting_agent_tool_rules():
+    """Issue #741: the per-agent conflict check must reject all three pairs, like the global one."""
+    with pytest.raises(PolicyValidationError, match=r"in both denied and ask"):
+        validate_policy_dict(
+            {
+                "version": "1.0",
+                "agent_rules": {
+                    "worker": {"denied_tools": ["Bash"], "ask_tools": ["Bash"]}
+                },
+            }
+        )
+
+    with pytest.raises(PolicyValidationError, match=r"in both allowed and ask"):
+        validate_policy_dict(
+            {
+                "version": "1.0",
+                "agent_rules": {
+                    "worker": {
+                        "allowed_tools": ["Bash"],
+                        "ask_tools": ["Bash"],
+                    }
+                },
+            }
+        )
+
+    with pytest.raises(PolicyValidationError, match=r"in both allowed and denied"):
+        validate_policy_dict(
+            {
+                "version": "1.0",
+                "agent_rules": {
+                    "worker": {
+                        "allowed_tools": ["Bash"],
+                        "denied_tools": ["Bash"],
+                    }
+                },
+            }
+        )
+
+    # The message names the agent and both lists
+    with pytest.raises(PolicyValidationError, match=r"'worker'.*'Bash'.*allowed.*ask"):
+        validate_policy_dict(
+            {
+                "version": "1.0",
+                "agent_rules": {
+                    "worker": {
+                        "allowed_tools": ["Bash"],
+                        "ask_tools": ["Bash"],
+                    }
+                },
+            }
+        )
+
+
+def test_agent_list_conflicts_with_global_list_still_valid():
+    """Issue #741: the new checks are scoped per agent.
+
+    A tool shared between an agent's list and a *global* list is not a
+    conflict -- the agent rule intentionally overrides the global one.
+    """
+    raw = {
+        "version": "1.0",
+        "allowed_tools": ["Read"],
+        "denied_tools": ["Bash"],
+        "ask_tools": ["Write"],
+        "agent_rules": {
+            "researcher": {
+                "allowed_tools": ["Bash"],
+                "ask_tools": ["Read"],
+                "denied_tools": ["Write"],
+            }
+        },
+    }
+    schema = validate_policy_dict(raw)
+    assert schema.agent_rules["researcher"].allowed_tools == ["Bash"]
+
+
+def test_compile_policy_enforces_allowed_roots():
+    raw = {
+        "version": "1.0",
+        "name": "roots",
+        "default_decision": "allow",
+        "allowed_tools": ["Read"],
+        "allowed_roots": ["/var/data"],
+    }
+    policy = compile_policy(validate_policy_dict(raw))
+
+    # A read inside the only configured root is allowed by the tool rule
+    inside = ToolRequest.from_tool_input("Read", {"file_path": "/var/data/notes.txt"})
+    assert policy.decide(inside).decision == "allow"
+
+    # ... the same read escaping it is confined by the path rule, not by the
+    # tool lists, so default_decision="allow" cannot paper over the escape.
+    outside = ToolRequest.from_tool_input("Read", {"file_path": "/etc/passwd"})
+    verdict = policy.decide(outside)
+    assert verdict.decision == "deny"
+    assert "allowed_roots" in verdict.reason
+
+
+def test_compile_policy_without_allowed_roots_leaves_paths_unconfined():
+    raw = {
+        "version": "1.0",
+        "name": "no_roots",
+        "default_decision": "allow",
+        "allowed_tools": ["Read"],
+    }
+    policy = compile_policy(validate_policy_dict(raw))
+    outside = ToolRequest.from_tool_input("Read", {"file_path": "/etc/passwd"})
+    assert policy.decide(outside).decision == "allow"
+
+
+def test_yaml_policy_without_pyyaml_raises_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #735: without pyyaml a YAML policy must fail with a clear error.
+
+    The old inline key-value parser could not express lists or nested
+    mappings, so a schema-valid YAML file was type-corrupted and then
+    reported as the operator's validation error (or as an unknown field
+    when a nested agent_rules block leaked in as a top-level key).
+    """
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    yaml_doc = (
+        'version: "1.0"\n'
+        'name: "needs_yaml"\n'
+        "allowed_tools:\n"
+        '  - "Read"\n'
+        "agent_rules:\n"
+        "  untrusted_subagent:\n"
+        "    denied_tools:\n"
+        '      - "Bash"\n'
+    )
+    with pytest.raises(PolicyValidationError, match="requires pyyaml"):
+        load_security_policy(yaml_doc)
+
+
+def test_json_policy_still_loads_without_pyyaml(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #735: JSON policies use the stdlib, so pyyaml must not be required."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    schema = load_security_policy(
+        json.dumps({"version": "1.0", "allowed_tools": ["Read"]})
+    )
+    assert schema.allowed_tools == ["Read"]
+
+
+def test_yaml_policy_loads_when_pyyaml_available() -> None:
+    """Issue #735: the documented YAML form loads correctly when pyyaml exists."""
+    pytest.importorskip("yaml")
+    yaml_doc = (
+        'version: "1.0"\n'
+        'name: "production_sandbox_policy"\n'
+        "allowed_tools:\n"
+        '  - "Read"\n'
+        '  - "Grep"\n'
+        "agent_rules:\n"
+        "  untrusted_subagent:\n"
+        "    denied_tools:\n"
+        '      - "Bash"\n'
+    )
+    schema = load_security_policy(yaml_doc)
+    assert schema.name == "production_sandbox_policy"
+    assert schema.allowed_tools == ["Read", "Grep"]
+    assert "untrusted_subagent" in schema.agent_rules
+    assert schema.agent_rules["untrusted_subagent"].denied_tools == ["Bash"]
+
+
+def test_load_security_policy_missing_file_raises_filenotfound(tmp_path: Path):
+    missing_path = tmp_path / "non_existent_policy.yaml"
+    with pytest.raises(FileNotFoundError, match="Security policy file not found"):
+        load_security_policy(missing_path)
+
+
+def test_load_security_policy_directory_raises_filenotfound(tmp_path: Path):
+    policy_dir = tmp_path / "policy_dir"
+    policy_dir.mkdir()
+    with pytest.raises(FileNotFoundError, match="Security policy file not found"):
+        load_security_policy(policy_dir)

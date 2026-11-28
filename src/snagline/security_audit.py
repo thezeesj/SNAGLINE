@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 Decision = Literal["allow", "ask", "deny"]
 GENESIS_HASH: str = "0" * 64
@@ -109,7 +112,16 @@ class SecurityAuditLog:
             self._load_existing()
 
     def _load_existing(self) -> None:
-        """Load and verify existing records from log_path."""
+        """Load existing records from log_path and verify their hash chain.
+
+        Malformed lines are skipped unless ``fail_closed=True``. The parsed
+        records must also form an untampered chain: a history edit changes the
+        hashed content while leaving the stored hashes in place, so JSON
+        decoding alone cannot tell a pristine log from a rewritten one. A
+        broken chain raises :class:`AuditLogError` under ``fail_closed=True``
+        (tamper evidence is the ledger's purpose) and is logged but still
+        loaded in the fail-open mode, exactly as malformed lines are.
+        """
         if not self.log_path:
             return
         try:
@@ -133,6 +145,21 @@ class SecurityAuditLog:
                 raise AuditLogError(
                     f"Failed to read audit log {self.log_path}: {err}"
                 ) from err
+
+        is_valid, fault = self.verify()
+        if is_valid:
+            return
+        if self.fail_closed:
+            raise AuditLogError(
+                f"Loaded audit log {self.log_path} fails chain verification: {fault}"
+            )
+        logger.warning(
+            "Snagline audit log %s fails chain verification (%s); loading it "
+            "anyway because fail_open is enabled. Call verify() on the log "
+            "before trusting its history.",
+            self.log_path,
+            fault,
+        )
 
     def append(
         self,
@@ -238,7 +265,12 @@ class SecurityAuditLog:
 
 
 def verify_audit_log_file(file_path: str | Path) -> tuple[bool, str | None]:
-    """Standalone utility to verify hash-chain integrity of an audit log file on disk."""
+    """Standalone utility to verify hash-chain integrity of an audit log file on disk.
+
+    Blank lines are tolerated (they are by :class:`SecurityAuditLog`'s loader
+    too) and are not counted as records, so a file the loader accepts verifies
+    with the same verdict as an in-memory :meth:`SecurityAuditLog.verify`.
+    """
     path = Path(file_path)
     if not path.exists():
         return False, f"Audit log file not found: {path}"
@@ -246,7 +278,11 @@ def verify_audit_log_file(file_path: str | Path) -> tuple[bool, str | None]:
     expected_prev = GENESIS_HASH
     try:
         with open(path, encoding="utf-8") as f:
-            for line_num, line in enumerate(f):
+            # Count records, not physical lines: a blank line is legal fill the
+            # loader skips, but ``enumerate(f)`` would charge every subsequent
+            # record with it and report phantom broken indexes.
+            record_num = 0
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
@@ -254,25 +290,26 @@ def verify_audit_log_file(file_path: str | Path) -> tuple[bool, str | None]:
                     data = json.loads(line)
                     record = AuditRecord.from_dict(data)
                 except Exception as err:
-                    return False, f"Malformed JSON at line {line_num + 1}: {err}"
+                    return False, f"Malformed JSON at line {line_num}: {err}"
 
-                if record.index != line_num:
+                if record.index != record_num:
                     return (
                         False,
-                        f"Broken index at line {line_num + 1}: expected {line_num}, got {record.index}",
+                        f"Broken index at line {line_num}: expected {record_num}, got {record.index}",
                     )
                 if record.previous_hash != expected_prev:
                     return False, (
-                        f"Broken chain link at line {line_num + 1}: expected previous {expected_prev}, "
+                        f"Broken chain link at line {line_num}: expected previous {expected_prev}, "
                         f"got {record.previous_hash}"
                     )
                 computed = record.compute_hash()
                 if record.entry_hash != computed:
                     return False, (
-                        f"Hash mismatch at line {line_num + 1}: computed {computed}, "
+                        f"Hash mismatch at line {line_num}: computed {computed}, "
                         f"recorded {record.entry_hash}"
                     )
                 expected_prev = record.entry_hash
+                record_num += 1
         return True, None
     except OSError as err:
         return False, f"Failed reading audit log: {err}"

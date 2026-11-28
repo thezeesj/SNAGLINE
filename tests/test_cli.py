@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 from argparse import Namespace
+from pathlib import Path
 from typing import cast
 
 import pytest
 
-from snagline.cli import main
+from snagline.cli import _event_to_json, main
 from snagline.config import Config
+from snagline.events import StepEvent
 from snagline.sinks.base import AlertSink
 from snagline.sinks.dedup import DedupSink
 from snagline.sinks.pagerduty import PagerDutySink
@@ -481,3 +484,114 @@ def test_baseline_list_versions_without_trajectory_positional_arg(capsys, tmp_pa
     assert rc_store_only == 2
     err_store_only = capsys.readouterr().err
     assert "the following arguments are required: trajectory|retrain" in err_store_only
+
+
+def test_validate_policy_missing_file_cli(capsys, tmp_path):
+    """Ensure validate-policy on a non-existent file reports file not found and exits 2 (#764)."""
+    missing_file = tmp_path / "non_existent_policy.yaml"
+    rc = main(["validate-policy", str(missing_file)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "Security policy file not found" in err
+    assert "Policy must be a mapping" not in err
+
+
+def test_validate_policy_valid_file_cli(capsys, tmp_path):
+    """Ensure validate-policy on a valid file succeeds and exits 0 (#764)."""
+    valid_file = tmp_path / "valid_policy.json"
+    valid_file.write_text(
+        json.dumps({"version": "1.0", "name": "my_policy"}),
+        encoding="utf-8",
+    )
+    rc = main(["validate-policy", str(valid_file)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Policy 'my_policy' (v1.0) is valid." in out
+
+
+def test_main_hook_forwards_intent_to_out(tmp_path, monkeypatch):
+    """Issue #763: `_event_to_json` enumerated the StepEvent fields by hand and
+    was never updated when intent landed in #603, so an event ingested with an
+    intent was re-emitted without one -- GoalDriftDetector was unreachable over
+    `snagline hook --out/--url` for exactly the reason #226 describes."""
+    out = tmp_path / "out.jsonl"
+    # Already-canonical payload: the bridge accepts all 14 fields on the way in,
+    # so this isolates what the forward path preserves.
+    payload = json.dumps(
+        {
+            "step_id": "s-intent",
+            "episode_id": "ep-intent",
+            "timestamp": 1.0,
+            "action_type": "plan_step",
+            "action_signature": "SIG",
+            "tool_name": "search",
+            "intent": "find last quarter's invoices",
+            "side_effect": False,
+            "metadata": {"source": "test"},
+        }
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    assert main(["hook", "--out", str(out)]) == 0
+    forwarded = json.loads(out.read_text().splitlines()[0])
+    assert forwarded["intent"] == "find last quarter's invoices"
+    # And the rest of the lossless claim still holds.
+    assert forwarded["episode_id"] == "ep-intent"
+    assert forwarded["side_effect"] is False
+    assert forwarded["metadata"] == {"source": "test"}
+
+
+def test_event_to_json_covers_every_step_event_field():
+    # The enumeration is hand-maintained, so pin it to the dataclass: a field
+    # added to StepEvent must be added here too or it is silently dropped on
+    # --out/--url (intent was, #763; side_effect/metadata before it, #226).
+    event = StepEvent(
+        step_id="s",
+        episode_id="e",
+        timestamp=1.0,
+        action_type="tool_call",
+        action_signature="SIG",
+        intent="no-op",
+    )
+    serialized = _event_to_json(event)
+    assert set(serialized) == {f.name for f in dataclasses.fields(StepEvent)}
+
+
+@pytest.mark.parametrize(
+    ("agent_id", "decision", "exit_code"),
+    [
+        ("worker", "deny", 2),
+        ("reviewer", "ask", 1),
+        ("other", "allow", 0),
+        (None, "allow", 0),
+    ],
+)
+def test_eval_applies_agent_scoped_policy(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    agent_id: str | None,
+    decision: str,
+    exit_code: int,
+) -> None:
+    """The CLI must pass the selected agent through to real policy evaluation."""
+    policy = tmp_path / "policy.json"
+    policy.write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "default_decision": "allow",
+                "agent_rules": {
+                    "worker": {"denied_tools": ["Read"]},
+                    "reviewer": {"ask_tools": ["Read"]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = ["eval", "--tool", "Read", "--policy", str(policy), "--json"]
+    if agent_id is not None:
+        args.extend(["--agent-id", agent_id])
+
+    assert main(args) == exit_code
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out)["decision"] == decision

@@ -33,15 +33,17 @@ ACTION_MAP: dict[str, str] = {
     "cat": "read",
     "write_file": "write",
     "write": "write",
-    "edit": "edit",
+    "edit": "write",
+    "edit_file": "write",
     "create": "write",
     "bash": "execute",
     "sh": "execute",
     "terminal": "execute",
     "execute_command": "execute",
     "run_command": "execute",
-    "delete_file": "delete",
-    "remove": "delete",
+    "delete_file": "write",
+    "delete": "write",
+    "remove": "write",
 }
 
 RESOURCE_KEYS = ("command", "path", "file_path", "uri", "url", "file", "target")
@@ -116,6 +118,7 @@ class McpSecurityGateway:
                 action=tool_req.action,
                 resource=tool_req.resource,
                 tool_input=tool_req.tool_input,
+                agent_id=tool_req.agent_id,
                 policy=self.policy,
                 policy_path=self.policy_path,
                 scoring_engine=self.scoring_engine,

@@ -634,6 +634,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--resource", default=None, help="Resource target (command string, path, url)."
     )
     p_eval.add_argument(
+        "--agent-id",
+        default=None,
+        help="Agent identifier for agent-scoped policy rules.",
+    )
+    p_eval.add_argument(
         "--policy", default=None, help="Path to a security policy YAML/JSON file."
     )
     p_eval.add_argument(
@@ -785,7 +790,9 @@ def _cmd_watch(args: argparse.Namespace) -> int:
 
 
 # Required positional fields and complete field set for StepEvent (issue #620).
-# Mirrors the 13 fields round-tripped losslessly by _event_to_json below.
+# Mirrors the fields round-tripped losslessly by _event_to_json below; both
+# derive from dataclasses.fields, so a new field cannot drift between them
+# again the way intent did (issue #763).
 _REQUIRED_EVENT_FIELDS: frozenset[str] = frozenset(
     f.name
     for f in dataclasses.fields(StepEvent)
@@ -880,13 +887,16 @@ def _cmd_hook(args: argparse.Namespace) -> int:
 
 
 def _event_to_json(event: StepEvent) -> dict:
-    # All 13 StepEvent fields, so the hook bridge round-trips losslessly.
+    # All 14 StepEvent fields, so the hook bridge round-trips losslessly.
     # ``side_effect`` and ``metadata`` were previously dropped, which made
     # SideEffectGuardDetector and CompactionTripwireDetector structurally
     # unreachable over `snagline hook --out/--url` (issue #226). ``metadata``
     # is host-provided: whatever the host emits in its payload is what lands
     # in the --out file or the POST body (documented privacy posture -- the
-    # bridge never adds content, it just stops subtracting).
+    # bridge never adds content, it just stops subtracting). ``intent`` went
+    # the same way when it was added (issue #603): the bridge already accepts
+    # it on the way in, but dropping it on the way out made GoalDriftDetector
+    # unreachable over `--out/--url` too (issue #763).
     return {
         "step_id": event.step_id,
         "episode_id": event.episode_id,
@@ -901,6 +911,7 @@ def _event_to_json(event: StepEvent) -> dict:
         "tokens_out": event.tokens_out,
         "side_effect": event.side_effect,
         "metadata": event.metadata,
+        "intent": event.intent,
     }
 
 
@@ -1684,6 +1695,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             tool_name=args.tool,
             action=args.action,
             resource=args.resource,
+            agent_id=args.agent_id,
             policy_path=args.policy,
         )
     except Exception as err:
@@ -1706,10 +1718,12 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate_policy(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
     from snagline.security_policy import load_security_policy
 
     try:
-        schema = load_security_policy(args.policy_file)
+        schema = load_security_policy(Path(args.policy_file))
         print(f"Policy {schema.name!r} (v{schema.version}) is valid.")
         return 0
     except Exception as err:

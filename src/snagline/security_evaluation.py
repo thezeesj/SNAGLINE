@@ -41,6 +41,7 @@ def evaluate_request(
     action: str = "unknown",
     resource: str | None = None,
     tool_input: Mapping[str, Any] | None = None,
+    agent_id: str | None = None,
     policy: Policy | None = None,
     policy_path: str | Path | None = None,
     scoring_engine: SecurityScoringEngine | None = None,
@@ -57,7 +58,7 @@ def evaluate_request(
     if policy is not None:
         active_policy = policy
     elif policy_path is not None:
-        schema = load_security_policy(policy_path)
+        schema = load_security_policy(Path(policy_path))
         active_policy = compile_policy(schema)
     else:
         active_policy = Policy(default_decision="allow")
@@ -95,17 +96,35 @@ def evaluate_request(
 
     # Secret exposure inspection
     try:
+        from snagline.secret_security import SecretFinding
         from snagline.secret_security import inspect_text as inspect_secret
+        from snagline.secret_security import (
+            inspect_tool_input as inspect_secrets_in_input,
+        )
 
+        # Same coverage as the prompt-injection pass above: scan every value in
+        # tool_input, not just the extracted resource, so a secret pasted into a
+        # non-resource argument (e.g. ``content``) is still caught.
+        secret_hits: list[SecretFinding] = []
         if res_str:
-            for match in inspect_secret(res_str):
-                findings.append(
-                    {
-                        "rule_id": match.rule_id,
-                        "severity": match.severity,
-                        "reason": f"Secret pattern matched: {match.rule_id}",
-                    }
-                )
+            secret_hits.extend(inspect_secret(res_str))
+        if input_map:
+            secret_hits.extend(inspect_secrets_in_input(input_map))
+        # Deduplicate by (rule_id, signature): the resource is usually also a
+        # value in tool_input, and the same secret must not be scored twice.
+        seen_secrets: set[tuple[str, str]] = set()
+        for match in secret_hits:
+            key = (match.rule_id, match.secret_signature)
+            if key in seen_secrets:
+                continue
+            seen_secrets.add(key)
+            findings.append(
+                {
+                    "rule_id": match.rule_id,
+                    "severity": match.severity,
+                    "reason": f"Secret pattern matched: {match.rule_id}",
+                }
+            )
     except ImportError:
         pass
 
@@ -115,6 +134,7 @@ def evaluate_request(
         action=action,
         resource=res_str,
         tool_input=input_map,
+        agent_id=agent_id,
     )
     verdict = active_policy.decide(request)
 

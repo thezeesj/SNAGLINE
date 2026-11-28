@@ -79,7 +79,22 @@ class BatchingSink:
                 f"got {flush_interval!r}"
             )
         self._flush_interval = flush_interval
-        self._min_gap = 1.0 / max_per_second if max_per_second else 0.0
+        if max_per_second is not None and (
+            not math.isfinite(max_per_second) or max_per_second <= 0.0
+        ):
+            # A negative rate inverts the gate below (``wait`` is always
+            # negative, so delivery is never paced), NaN makes every
+            # comparison False with the same effect, and 0.0 makes the
+            # truthiness of ``max_per_second`` itself fold to "no limit",
+            # silently discarding the throttle the caller asked for
+            # (issue #771). None is the one form of "unpaced" this sink
+            # supports, so anything else must be a real finite rate; reject
+            # rather than clamp -- a rate has no meaningful floor here.
+            raise ValueError(
+                f"max_per_second must be a finite positive number or None; "
+                f"got {max_per_second!r}"
+            )
+        self._min_gap = 1.0 / max_per_second if max_per_second is not None else 0.0
         self._queue: collections.deque[FailureRisk] = collections.deque()
         self._lock = threading.Lock()
         # Delivery pacing is shared across every batch and flush path. Keep it

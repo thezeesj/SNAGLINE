@@ -39,7 +39,7 @@ from snagline.risk import (
     SEVERITY_WARNING,
     FailureRisk,
 )
-from snagline.sinks.base import format_sink_repr
+from snagline.sinks.base import format_sink_repr, validate_min_severity
 
 logger = logging.getLogger("snagline")
 
@@ -110,6 +110,7 @@ class ConsoleSink:
         self._stream = stream if stream is not None else sys.stderr
         self._logger = logger
         self._level = level
+        validate_min_severity(min_severity)
         self._min = min_severity
         self._fault_logged = False
         # Sink dispatch runs *outside* Monitor's per-episode lock

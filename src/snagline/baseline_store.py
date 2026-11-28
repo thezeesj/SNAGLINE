@@ -44,23 +44,36 @@ from snagline.baseline import BaselineProfile, fit_baseline_from_jsonl
 # missing, or escape the scope dir with ``..``) and no leading ``.``/``-``
 # (which rules out ``.``, ``..`` and hidden files). The synthesized default
 # ``f"{time.time():.6f}"`` matches this (issue #451).
+#
+# ``tenant`` and ``deployment`` join the same directory hierarchy
+# (``root/tenant/deployment``) without any other normalization, so the exact
+# same component discipline applies to them (issue #770): an unvalidated
+# ``../..`` segment resolves the scope -- and everything written through it --
+# outside ``root_dir`` altogether.
 _SAFE_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-def _validate_version_id(version: str) -> str:
-    """Return ``version`` if it is a single path-safe component, else raise.
+def _validate_scope_component(value: str, field: str) -> str:
+    """Return ``value`` if it is a single path-safe component, else raise.
 
-    Fails loudly at the top of the write/read path instead of mid-write (a
-    ``/`` leaves a save half-done after it has advertised the id) or silently
-    out of tree (``..`` escapes the scope directory).
+    ``field`` names the caller-facing segment (``tenant``, ``deployment``,
+    ``version id``) so the error points at the input that was wrong. Fails
+    loudly at the top of the write/read path instead of mid-write (a ``/``
+    leaves a save half-done after it has advertised the id) or silently out
+    of tree (``..`` escapes the scope directory).
     """
-    if not isinstance(version, str) or _SAFE_VERSION_RE.fullmatch(version) is None:
+    if not isinstance(value, str) or _SAFE_VERSION_RE.fullmatch(value) is None:
         raise ValueError(
-            f"invalid baseline version id {version!r}: expected a single "
+            f"invalid baseline {field} {value!r}: expected a single "
             r"path-safe component matching [A-Za-z0-9][A-Za-z0-9._-]* "
             r"(no '/', '\', '..', or leading '.'/'-')"
         )
-    return version
+    return value
+
+
+def _validate_version_id(version: str) -> str:
+    """Return ``version`` if it is a single path-safe component, else raise."""
+    return _validate_scope_component(version, "version id")
 
 
 def _write_json(stream: IO[str], data: dict) -> None:
@@ -100,6 +113,12 @@ class BaselineStore:
 
     # --- paths ---------------------------------------------------------------
     def _scope_dir(self, tenant: str, deployment: str) -> Path:
+        # Every on-disk path (save, load, list, prune) funnels through here, so
+        # validating the two scope segments once covers the whole store. The
+        # check runs before any filesystem access: a bad segment must not
+        # create directories or write files outside root_dir (issue #770).
+        _validate_scope_component(tenant, "tenant")
+        _validate_scope_component(deployment, "deployment")
         return self._root / tenant / deployment
 
     def _version_path(self, tenant: str, deployment: str, version: str) -> Path:

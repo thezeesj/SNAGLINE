@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
+from dataclasses import replace
 
 import pytest
 
@@ -15,17 +17,21 @@ def _risk() -> FailureRisk:
     return FailureRisk("ep-1", "step-1", 0.8, "loop", "test detail", 1.0)
 
 
-def test_console_sink_writes_json_line_to_stream():
-    import io
-
+@pytest.mark.parametrize("severity", ["", "info", "warning", "critical"])
+def test_console_sink_writes_json_line_to_stream(severity: str) -> None:
     buf = io.StringIO()
     sink = ConsoleSink(stream=buf)
-    sink.emit(_risk())
-    line = buf.getvalue().strip()
-    assert line.startswith("{") and '"trigger": "loop"' in line
+    risk = replace(_risk(), severity=severity)
+    sink.emit(risk)
+    lines = buf.getvalue().splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["trigger"] == "loop"
+    assert payload["severity"] == risk.severity
 
 
-def test_console_sink_routes_through_logger():
+@pytest.mark.parametrize("severity", ["", "info", "warning", "critical"])
+def test_console_sink_routes_through_logger(severity: str) -> None:
     records: list[logging.LogRecord] = []
 
     class _Cap(logging.Handler):
@@ -37,11 +43,14 @@ def test_console_sink_routes_through_logger():
     logger.addHandler(cap)
     try:
         sink = ConsoleSink(logger=logger, level=logging.WARNING)
-        sink.emit(_risk())
+        risk = replace(_risk(), severity=severity)
+        sink.emit(risk)
     finally:
         logger.removeHandler(cap)
     assert len(records) == 1
-    assert '"trigger": "loop"' in records[0].getMessage()
+    payload = json.loads(records[0].getMessage())
+    assert payload["trigger"] == "loop"
+    assert payload["severity"] == risk.severity
 
 
 def test_console_sink_serializes_explicit_severity() -> None:

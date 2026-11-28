@@ -11,10 +11,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `observe_openai_call` and `observe_anthropic_call` now accept and forward
   host-declared `intent` to `StepEvent`, matching the raw adapter. The default
   remains `None` for existing callers (#773).
+- `snagline eval` now accepts `--agent-id` and applies matching per-agent policy
+  rules during offline evaluation (#812).
+- Alert sinks reject invalid `min_severity` values at construction with a
+  `ValueError` listing the supported levels (#815).
 - `WebhookSink` and `ConsoleSink` now include the risk's explicit or derived
   severity in their JSON payloads (#772).
 - `DiagnosticMetrics.record_timing` rejects negative and non-finite samples
   before they can corrupt latency percentiles (#774).
+- `PathSecurityConfig`, `DlpSecurityConfig`, and `SecretSecurityConfig` now
+  reject an invalid `min_severity`, `decision`, or `severity_overrides` value at
+  construction with a `ValueError`, matching `ShellThreatConfig`. Before, such a
+  value was accepted silently and resurfaced much later: an invalid
+  `min_severity` or override severity crashed `as_authorize_rule` with a bare
+  `KeyError` out of `findings_at_or_above`'s `_SEVERITY_RANK[...]` lookup once a
+  request produced findings, and an out-of-contract `decision` was emitted
+  verbatim as the rule verdict -- a security gate documented to only ever
+  escalate to `ask`/`deny` silently returning `allow`. The declarative
+  `policy_from_dict` path already validated these fields and is unaffected (#739).
+- `verify_audit_log_file` now counts records instead of physical lines, so a
+  blank line in an audit log no longer produces phantom "Broken index" failures.
+  The standalone verifier compared each record's `index` against `enumerate(f)`'s
+  physical line counter, while both readers treat blank lines as legal and skip
+  them -- so a file that loaded cleanly, verified in memory, and could still be
+  appended to failed standalone verification with one bogus index break per
+  blank line and no actual corruption (#737).
+- `SecurityAuditLog` now verifies the hash chain of an existing log while
+  loading it, as its docstring always claimed to. `_load_existing` only
+  JSON-decoded each line, so a history edit (changed content, stored hashes
+  left in place) loaded silently -- even with `fail_closed=True`, the mode
+  documented for tamper evidence, where the constructor raised only on a
+  malformed line. A broken chain now raises `AuditLogError` under
+  `fail_closed=True` and is logged (still loaded) in the fail-open mode,
+  matching how malformed lines are treated (#736).
+- `WebhookSink` and `ConsoleSink` now include `severity` in their JSON payloads,
+  preserving explicit severity overrides for downstream consumers (#772).
 - Release-notes extraction no longer silently publishes the whole `CHANGELOG.md`
   when `VERSION` matches no heading. `RELEASE_NOTES.md` is the GitHub release
   body, and the inline `python -c` step fell back to writing the entire file --
@@ -94,6 +125,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`semantic_drift_window_size`, default 20) using dual complementary
   statistics (windowed centroid deviation and mean per-event deviation) with a
   calibrated default tolerance of 0.2, resolving the multi-tool ceiling blind spot.
+- `evaluate_request()` now scans every value in `tool_input` for exposed secrets,
+  not just the extracted resource string. Its prompt-injection pass already used
+  `inspect_tool_input`, but the secret pass ran `inspect_text` on the resource
+  alone -- so on a `write_file`/`edit` call, where `file_path` is extracted as
+  the resource, an AWS key pasted into `content` sailed through `snagline eval`
+  and the MCP gateway while the same key placed in the resource was flagged
+  critical. The secret pass now runs the same `inspect_tool_input` walk the
+  authorize integration already used, and deduplicates by
+  `(rule_id, secret_signature)` so a secret present in both the resource and
+  `tool_input` is reported and scored once, not twice (#752).
+- `SecurityScoringEngine.evaluate()` now reads the `action` it was already
+  passed. The base-sensitivity lookup keyed solely on the tool name, so the six
+  action-word entries in `DEFAULT_TOOL_SENSITIVITIES` (`write`, `edit`, `patch`,
+  `delete`, `rm`, `read`) could fire only for a tool literally named that. A
+  mutating tool with an unrecognized name -- `cleanup_files` with
+  `action="delete"` -- scored the 25.0 unknown-tool baseline, identical to an
+  unrecognized reader, even though the caller told the engine what the tool
+  does. When the tool name has no entry, the engine now falls back to the
+  action-word sensitivity before the unknown-tool baseline; the name still wins
+  where it has its own entry (#753).
 
 ### Added
 - Added optional `intent: str | None = None` field to `StepEvent` and the `raw`

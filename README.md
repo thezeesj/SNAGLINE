@@ -559,7 +559,13 @@ Sinks consume `FailureRisk` and escalate it. Only `FailureRisk` fields are ever 
 |:--|:--|:--|:--|
 | **Console** (default) | `sinks/console.py` | (built-in) | Writes `FailureRisk` as a JSON line to stderr. Zero dependency. |
 | **Webhook** | `sinks/webhook.py` | (built-in) | POSTs `FailureRisk` JSON via stdlib `urllib.request`. Fire-and-forget with a short timeout (default 2s). Silently ignores a dead endpoint. |
+| **Slack** | `sinks/slack.py` | (built-in) | POSTs each `FailureRisk` as a Slack message to an incoming webhook URL. Fire-and-forget, same short-timeout posture as WebhookSink. |
+| **PagerDuty** | `sinks/pagerduty.py` | (built-in) | Triggers a PagerDuty incident per `FailureRisk` through the Events API v2. |
 | **Logging** | `sinks/logging_sink.py` | (built-in) | Emits one compact JSON object per risk on the `snagline` logger for log aggregators (`Config.log_format`: `text` or `json`, env `SNAGLINE_LOG_FORMAT`). Wired end to end: with `json`, `Monitor.default()` and every CLI run path install it next to ConsoleSink. Fail-open with a plain-text fallback if serialization breaks. Zero dependency. |
+| **Dedup** | `sinks/dedup.py` | (built-in) | Wrap any sink so identical alerts are emitted at most once per `cooldown_seconds` (`snagline watch --cooldown-seconds`, issue #4). Fail-open: a bookkeeping error never blocks the wrapped sink. |
+| **Batching** | `sinks/batching.py` | (built-in) | Buffer emissions and flush them on a background thread (interval or `max_batch`), with an optional `max_per_second` rate limit so bursts do not trip a destination's rate limiter. |
+| **Continuum** | `sinks/continuum_sink.py` | `snagline[continuum]` | Forwards risks into CONTINUUM as `REQUIRES_REVIEW` actions via `ActionLedger.flag_for_review` (issue #79); needs a resolvable action key per risk. |
+| **Heartbeat** | `sinks/heartbeat.py` | (built-in) | Not an escalation path: touches a liveness file's mtime per ingest so an external supervisor (cron, systemd, k8s probe) can detect a hung host (`snagline watch --heartbeat PATH`). |
 
 Custom sinks implement the `AlertSink` protocol:
 
@@ -695,7 +701,7 @@ The system is built on immutable dataclasses with a zero-dependency core. State 
 | **Schema** | `StepEvent`, `FailureRisk`, `Config` | Canonical data types (frozen dataclasses) |
 | **Orchestrator** | `Monitor` | Fail-open wrapper around detectors and sinks |
 | **Detectors** | `LoopDetector`, `ErrorCascadeDetector`, `LatencyAnomalyDetector` | Tier-1 failure detection (O(1) amortized) |
-| **Sinks** | `ConsoleSink`, `WebhookSink` | Escalation paths (fire-and-forget) |
+| **Sinks** | `ConsoleSink`, `WebhookSink`, `SlackSink`, `PagerDutySink`, `LoggingSink`, `DedupSink`, `BatchingSink`, `ContinuumSink`, `HeartbeatSink` | Escalation paths (fire-and-forget) |
 | **Adapters** | `raw.watch`, `SnaglineCallbackHandler`, `watch_graph`, Claude Code | Framework-specific event normalization |
 | **Server** | `http_server.py` | stdlib `ThreadingHTTPServer` sidecar for non-Python agents |
 | **CLI** | `cli.py` | `replay`, `bench`, `serve`, `watch`, `hook` commands |
@@ -732,6 +738,9 @@ from snagline import Monitor, StepEvent, FailureRisk, Config, make_signature, wa
 | `snagline watch --sink webhook --webhook-url URL` | Live stdin mode |
 | `snagline watch --follow --file events.jsonl --heartbeat /var/run/snagline/hb` | Tail a file and leave liveness evidence an external supervisor can watch |
 | `snagline hook --url URL` | Command bridge (always exits 0) |
+| `snagline baseline run.jsonl --store-dir DIR --tenant acme` | Fit a healthy-run baseline (per-tool latency/error profile) and store it in a versioned, per-tenant store; `--list-versions` lists it, and `snagline baseline retrain --windows-dir DIR` refits from the newest window and atomically bumps the store pointer |
+| `snagline eval --tool Bash --action execute --resource "rm -rf /"` | Offline evaluation of a proposed tool request against the security policies (inspectors, policy verdict, risk score) |
+| `snagline validate-policy policy.json` | Validate a security policy file against the schema before deploying it (issue #647) |
 
 Every command handles errors gracefully. `snagline hook` always exits 0 (fail-open by construction). `snagline watch` skips malformed lines and reports a summary.
 

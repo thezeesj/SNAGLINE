@@ -313,3 +313,39 @@ def test_close_does_not_hold_the_delivery_lock_across_its_own_flush(monkeypatch)
         "close() must terminate even when an alert arrives mid-flush; holding "
         "_delivery_lock across _flush() deadlocks shutdown"
     )
+
+
+# --- Invalid max_per_second (issue #771) ------------------------------------
+# 1.0 / max_per_second fed a truthiness gate in _deliver, so a negative rate
+# made every wait negative (delivery never paced -- the throttle was silently
+# off, not merely generous), NaN made every comparison False with the same
+# effect, and 0.0 folded to "unlimited" via bool(0.0). None is the only
+# supported spelling of "unpaced"; a rate, if given, must be a real one.
+
+
+@pytest.mark.parametrize(
+    "bad", [0.0, -1.0, -0.5, float("inf"), float("-inf"), float("nan")]
+)
+def test_invalid_max_per_second_is_rejected(bad: float) -> None:
+    with pytest.raises(ValueError, match="max_per_second must be a finite"):
+        BatchingSink(_RecordingSink(), max_per_second=bad)
+
+
+def test_max_per_second_none_means_unpaced() -> None:
+    inner = _RecordingSink()
+    sink = BatchingSink(inner, max_batch=1000, flush_interval=0.05)
+    try:
+        assert sink._min_gap == 0.0
+        sink.emit(_risk(0))
+        sink.flush_now()
+        assert len(inner.emitted) == 1
+    finally:
+        sink.close()
+
+
+def test_max_per_second_sets_the_delivery_gap() -> None:
+    sink = BatchingSink(_RecordingSink(), max_per_second=20.0)
+    try:
+        assert sink._min_gap == pytest.approx(0.05)
+    finally:
+        sink.close()

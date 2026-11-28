@@ -100,6 +100,47 @@ def test_unexpandable_tilde_path_not_joined_under_base_dir(
     assert norm == unexpandable
 
 
+def test_traversal_verdict_consistent_for_tilde_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #743: a ~-rooted path must not be flagged as escaping base_dir.
+
+    The same file is clean when written absolutely (#678 exempts absolute paths
+    from the escapes_base check); the ~ spelling must agree, because
+    normalize_lexical_path treats it as home-relative, not base_dir-relative.
+    """
+    fake_home = "C:/Users/alice" if os.name == "nt" else "/home/alice"
+    monkeypatch.setenv("HOME", fake_home)
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", "C:\\Users\\alice")
+
+    cfg = PathSecurityConfig(base_dir="/workspace")
+    hits = [f.rule_id for f in inspect_path("~/notes.txt", cfg)]
+    assert "path_traversal" not in hits
+    # The genuinely absolute spelling of the same file stays clean too
+    hits_abs = [f.rule_id for f in inspect_path(f"{fake_home}/notes.txt", cfg)]
+    assert "path_traversal" not in hits_abs
+
+
+def test_traversal_verdict_consistent_for_unexpandable_tilde_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #743: an unexpandable ~user path is home-relative too, not a traversal."""
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p)
+    cfg = PathSecurityConfig(base_dir="/workspace")
+    hits = [f.rule_id for f in inspect_path("~nobody/notes.txt", cfg)]
+    assert "path_traversal" not in hits
+
+
+def test_traversal_still_fires_for_genuinely_escaping_relative_paths() -> None:
+    """Issue #743: exempting ~-rooted paths must not blunt the relative-path check."""
+    cfg = PathSecurityConfig(base_dir="/workspace")
+    hits = [f.rule_id for f in inspect_path("../esc.py", cfg)]
+    assert "path_traversal" in hits
+    hits_in_base = [f.rule_id for f in inspect_path("src/a.py", cfg)]
+    assert "path_traversal" not in hits_in_base
+
+
 # ---------------------------------------------------------------------------
 # Path traversal tests
 # ---------------------------------------------------------------------------
@@ -560,3 +601,21 @@ def test_valid_absolute_path_in_allowed_roots_not_flagged_as_traversal_issue_678
     )
     win_findings = inspect_path("D:/scratch/test.txt", win_cfg)
     assert not any(f.rule_id == "path_traversal" for f in win_findings)
+
+
+def test_path_config_rejects_invalid_severity_fields() -> None:
+    """Invalid min_severity/decision/severity_overrides must fail at construction.
+
+    Before this, an invalid ``min_severity`` was accepted and later surfaced as a
+    bare ``KeyError`` from ``_SEVERITY_RANK`` inside ``findings_at_or_above`` when
+    ``as_authorize_rule`` evaluated a request, and an out-of-contract ``decision``
+    was emitted verbatim as the rule verdict.
+    """
+    with pytest.raises(ValueError, match="invalid min_severity"):
+        PathSecurityConfig(min_severity="bogus")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="invalid decision"):
+        PathSecurityConfig(decision="allow")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="invalid severity override"):
+        PathSecurityConfig(severity_overrides={"sensitive_locations": "bogus"})  # type: ignore[arg-type,dict-item]

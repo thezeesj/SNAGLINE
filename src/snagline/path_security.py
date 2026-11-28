@@ -131,6 +131,23 @@ class PathSecurityConfig:
     min_severity: PathSeverity = "warning"
     decision: Literal["ask", "deny"] = "deny"
 
+    def __post_init__(self) -> None:
+        if self.min_severity not in _SEVERITY_RANK:
+            raise ValueError(
+                f"invalid min_severity {self.min_severity!r}; "
+                f"must be one of {sorted(_SEVERITY_RANK)}"
+            )
+        if self.decision not in ("ask", "deny"):
+            raise ValueError(
+                f"invalid decision {self.decision!r}; must be 'ask' or 'deny'"
+            )
+        for rule_id, sev in self.severity_overrides.items():
+            if sev not in _SEVERITY_RANK:
+                raise ValueError(
+                    f"invalid severity override {sev!r} for rule {rule_id!r}; "
+                    f"must be one of {sorted(_SEVERITY_RANK)}"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Lexical path normalization
@@ -291,8 +308,13 @@ def rule_path_traversal(
 
     # If base_dir is configured, check if relative path escapes base_dir
     escapes_base = False
-    is_absolute = clean_raw.startswith("/") or bool(
-        re.match(r"^[a-zA-Z]:[/\\]", clean_raw)
+    # A "~"-rooted path is home-relative, not base_dir-relative: normalize_lexical_path
+    # expands it to an absolute home path, so it is exempt from the escapes_base check
+    # the same way a raw absolute path is (#678, #692, #743).
+    is_absolute = (
+        clean_raw.startswith("/")
+        or clean_raw.startswith("~")
+        or bool(re.match(r"^[a-zA-Z]:[/\\]", clean_raw))
     )
     if config.base_dir and not is_absolute:
         norm_base = normalize_lexical_path(config.base_dir)

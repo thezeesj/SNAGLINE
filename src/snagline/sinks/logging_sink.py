@@ -41,7 +41,7 @@ from snagline.risk import (
     SEVERITY_WARNING,
     FailureRisk,
 )
-from snagline.sinks.base import format_sink_repr
+from snagline.sinks.base import format_sink_repr, validate_min_severity
 
 logger = logging.getLogger("snagline")
 
@@ -193,6 +193,7 @@ class LoggingSink:
         self._logger = logger if logger is not None else logging.getLogger("snagline")
         self._level = level
         self._formatter = formatter if formatter is not None else JsonRiskFormatter()
+        validate_min_severity(min_severity)
         self._min = min_severity
 
     def __repr__(self) -> str:

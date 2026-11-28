@@ -140,3 +140,59 @@ def test_load_version_rejects_unsafe_id(tmp_path):
     store.save(BaselineProfile(), tenant="t", deployment="d", version="v1")
     with pytest.raises(ValueError, match="version id"):
         store.load_version("t", "d", "../../../etc/passwd")
+
+
+@pytest.mark.parametrize(
+    "tenant,deployment",
+    [
+        ("../escaped", "prod"),
+        ("..", ".."),
+        ("t", "../../out"),
+        ("a/b", "d"),
+        ("a\\b", "d"),
+        ("", "d"),
+        ("t", ""),
+        ("t", "  "),
+        ("-t", "d"),
+        ("t", "."),
+    ],
+)
+def test_scope_segments_are_validated_as_path_safe(tmp_path, tenant, deployment):
+    # Issue #770: tenant/deployment were joined into root/<tenant>/<deployment>
+    # with no validation, so "../.." wrote and read outside root_dir. Every
+    # path funnels through _scope_dir, so the same check covers save, load,
+    # load_version and list_versions. Nothing may be written before the raise.
+    store = BaselineStore(str(tmp_path / "store"))
+    with pytest.raises(ValueError, match="path-safe component"):
+        store.save(
+            BaselineProfile(), tenant=tenant, deployment=deployment, version="v1"
+        )
+    with pytest.raises(ValueError, match="path-safe component"):
+        store.load(tenant=tenant, deployment=deployment)
+    with pytest.raises(ValueError, match="path-safe component"):
+        store.list_versions(tenant=tenant, deployment=deployment)
+    # No partial write and nothing escaped the store root.
+    assert list((tmp_path / "store").rglob("*.json")) == []
+    assert not (tmp_path / "escaped").exists()
+
+
+def test_scope_segment_error_names_the_offending_field(tmp_path):
+    # The two segments share one validator; the message must say which one was
+    # bad, so an operator can fix the right input.
+    store = BaselineStore(str(tmp_path / "store"))
+    with pytest.raises(ValueError, match="baseline tenant"):
+        store.save(BaselineProfile(), tenant="../x", deployment="prod", version="v1")
+    with pytest.raises(ValueError, match="baseline deployment"):
+        store.save(BaselineProfile(), tenant="t", deployment="../x", version="v1")
+
+
+def test_legitimate_scope_names_still_round_trip(tmp_path):
+    # The new guard must not collaterally reject names the regex was designed
+    # around: dotted, dashed and underscored multi-word scopes are the norm.
+    store = BaselineStore(str(tmp_path / "store"))
+    store.save(
+        BaselineProfile(), tenant="acme-corp", deployment="prod_v2.eu", version="v1"
+    )
+    assert store.list_versions("acme-corp", "prod_v2.eu") == ["v1"]
+    assert store.load("acme-corp", "prod_v2.eu") is not None
+    assert store.load_version("acme-corp", "prod_v2.eu", "v1") is not None

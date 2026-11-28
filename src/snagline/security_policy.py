@@ -175,10 +175,23 @@ def validate_policy_dict(raw: dict[str, Any]) -> SecurityPolicySchema:
                 f"Tool lists for agent {agent_id!r} must be lists of strings"
             )
 
-        if overlap := set(a_allowed).intersection(set(a_denied)):
-            raise PolicyValidationError(
-                f"Conflicting tools for agent {agent_id!r}: {sorted(overlap)}"
-            )
+        # Mirror the global conflict check: the three tool lists are mutually
+        # exclusive per agent too, not just allowed vs denied.
+        a_allow_set, a_deny_set, a_ask_set = (
+            set(a_allowed),
+            set(a_denied),
+            set(a_ask),
+        )
+        for left, right, left_name, right_name in (
+            (a_allow_set, a_deny_set, "allowed", "denied"),
+            (a_allow_set, a_ask_set, "allowed", "ask"),
+            (a_deny_set, a_ask_set, "denied", "ask"),
+        ):
+            if overlap := left.intersection(right):
+                raise PolicyValidationError(
+                    f"Conflicting tools for agent {agent_id!r}: "
+                    f"{sorted(overlap)} in both {left_name} and {right_name}"
+                )
 
         agent_rules[agent_id] = AgentRuleSpec(
             allowed_tools=list(a_allowed),
@@ -214,11 +227,19 @@ def load_security_policy(source: str | Any) -> SecurityPolicySchema:
     if isinstance(source, dict):
         raw = source
     elif isinstance(source, (str, Path)):
-        p = Path(source)
-        if p.exists() and p.is_file():
-            content = p.read_text(encoding="utf-8")
+        if isinstance(source, Path):
+            if not source.exists() or not source.is_file():
+                raise FileNotFoundError(f"Security policy file not found: {source}")
+            content = source.read_text(encoding="utf-8")
         else:
-            content = str(source)
+            p = Path(source)
+            try:
+                if p.exists() and p.is_file():
+                    content = p.read_text(encoding="utf-8")
+                else:
+                    content = str(source)
+            except OSError:
+                content = str(source)
 
         content = content.strip()
         if content.startswith("{"):
@@ -229,19 +250,24 @@ def load_security_policy(source: str | Any) -> SecurityPolicySchema:
                     f"Invalid JSON in policy source: {err}"
                 ) from err
         else:
-            # Attempt yaml parsing if pyyaml is installed, otherwise lightweight key-value parser
+            # YAML loading needs pyyaml, which is a dev-only dependency: the
+            # core package is intentionally dependency-free (pyproject.toml:
+            # "core: zero required dependencies, non-negotiable"). A hand-rolled
+            # subset parser cannot express this schema's lists or nested
+            # mappings -- list items are skipped outright and a nested
+            # agent_rules block leaks in as a top-level key -- so a schema-valid
+            # policy it "parses" is then reported as the operator's validation
+            # error. Refuse to guess; JSON policies need no dependency.
             try:
                 import yaml  # type: ignore
 
                 raw = yaml.safe_load(content)
-            except ImportError:
-                # Basic key-value parser for simple YAML specs
-                raw = {}
-                for line in content.splitlines():
-                    line = line.strip()
-                    if line and not line.startswith("#") and ":" in line:
-                        k, v = line.split(":", 1)
-                        raw[k.strip()] = v.strip()
+            except ImportError as err:
+                raise PolicyValidationError(
+                    "loading a YAML security policy requires pyyaml; install it "
+                    "with 'pip install pyyaml', or load the policy as JSON, "
+                    "which needs no extra dependency"
+                ) from err
             except Exception as err:
                 raise PolicyValidationError(
                     f"Invalid YAML in policy source: {err}"
@@ -309,7 +335,22 @@ def compile_policy(schema: SecurityPolicySchema) -> Any:
 
                 rules.append(_make_agent_allow(agent_id, a_names))
 
-    # 2. Global explicit rules
+    # 2. Filesystem confinement. `allowed_roots` is a validated schema field
+    #    (the canonical example in docs/SECURITY_POLICY.md lists it), and
+    #    validation accepting a field the compiler silently drops is a
+    #    downgrade with no diagnostic -- so route it through the same
+    #    path-security rule authorize's own policy loader builds instead of
+    #    leaving the boundary unenforced.
+    if schema.allowed_roots:
+        from snagline.path_security import PathSecurityConfig, as_authorize_rule
+
+        rules.append(
+            as_authorize_rule(
+                PathSecurityConfig(allowed_roots=tuple(schema.allowed_roots))
+            )
+        )
+
+    # 3. Global explicit rules
     if schema.denied_tools:
         rules.append(deny_tools(*schema.denied_tools))
     if schema.ask_tools:
