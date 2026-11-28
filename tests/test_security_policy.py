@@ -276,3 +276,14 @@ def test_yaml_policy_loads_when_pyyaml_available() -> None:
     assert schema.allowed_tools == ["Read", "Grep"]
     assert "untrusted_subagent" in schema.agent_rules
     assert schema.agent_rules["untrusted_subagent"].denied_tools == ["Bash"]
+def test_load_security_policy_missing_file_raises_filenotfound(tmp_path: Path):
+    missing_path = tmp_path / "non_existent_policy.yaml"
+    with pytest.raises(FileNotFoundError, match="Security policy file not found"):
+        load_security_policy(missing_path)
+
+
+def test_load_security_policy_directory_raises_filenotfound(tmp_path: Path):
+    policy_dir = tmp_path / "policy_dir"
+    policy_dir.mkdir()
+    with pytest.raises(FileNotFoundError, match="Security policy file not found"):
+        load_security_policy(policy_dir)
