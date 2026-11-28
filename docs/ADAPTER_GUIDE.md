@@ -33,8 +33,11 @@ When the run finishes, call `monitor.end_episode(episode_id)` so per-episode
 detector state (loop windows, CUSUM baselines) doesn't leak into the next run.
 If you never call it, the Monitor evicts the least-recently-seen episode once
 `max_live_episodes` (default 10000, env `SNAGLINE_MAX_LIVE_EPISODES`) is
-exceeded. Eviction is silent (no finalize risks) and the retained count is
-exposed as `monitor.retained_episodes`.
+exceeded. Eviction runs no `finalize` (unlike `end_episode`), so it never emits
+a risk itself — but it is no longer silent: it logs one deduped fault naming
+the cap, because eviction resets a still-running episode's in-flight detection
+state. Raise the cap if episodes are concurrent. The retained count is exposed
+as `monitor.retained_episodes`.
 If your framework is a context manager or generator, put that teardown in the
 `finally` - see `adapters/raw.py` and `adapters/langchain_adapter.py:close`.
 
