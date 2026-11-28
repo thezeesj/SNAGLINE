@@ -1054,6 +1054,11 @@ def _shell_threats_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
     disabled = raw.get("disabled_rules", [])
     if not isinstance(disabled, list) or not all(isinstance(v, str) for v in disabled):
         raise PolicyError(f"rules[{index}].disabled_rules must be a list of strings")
+    unknown = set(disabled) - BUILTIN_RULE_IDS
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].disabled_rules has unknown ids {sorted(unknown)}"
+        )
     enabled = raw.get("enabled_rules")
     enabled_set: frozenset[str] | None
     if enabled is None:
@@ -1077,6 +1082,11 @@ def _shell_threats_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
                 f"rules[{index}].severity_overrides[{key!r}]={value!r} is not a severity"
             )
         overrides[str(key)] = value
+    unknown = set(overrides) - BUILTIN_RULE_IDS
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].severity_overrides has unknown ids {sorted(unknown)}"
+        )
     cfg = ShellThreatConfig(
         enabled_rules=enabled_set,
         disabled_rules=frozenset(disabled),
@@ -1164,6 +1174,11 @@ def _path_security_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
     disabled = raw.get("disabled_rules", [])
     if not isinstance(disabled, list) or not all(isinstance(v, str) for v in disabled):
         raise PolicyError(f"rules[{index}].disabled_rules must be a list of strings")
+    unknown = set(disabled) - BUILTIN_RULE_IDS
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].disabled_rules has unknown ids {sorted(unknown)}"
+        )
 
     enabled = raw.get("enabled_rules")
     enabled_set: frozenset[str] | None
@@ -1189,6 +1204,11 @@ def _path_security_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
                 f"rules[{index}].severity_overrides[{key!r}]={value!r} is not a severity"
             )
         overrides[str(key)] = value
+    unknown = set(overrides) - BUILTIN_RULE_IDS
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].severity_overrides has unknown ids {sorted(unknown)}"
+        )
 
     cfg = PathSecurityConfig(
         allowed_roots=allowed_roots_tuple,
@@ -1250,6 +1270,11 @@ def _secret_exposure_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
     disabled = raw.get("disabled_rules", [])
     if not isinstance(disabled, list) or not all(isinstance(v, str) for v in disabled):
         raise PolicyError(f"rules[{index}].disabled_rules must be a list of strings")
+    unknown = set(disabled) - BUILTIN_RULE_IDS
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].disabled_rules has unknown ids {sorted(unknown)}"
+        )
 
     enabled = raw.get("enabled_rules")
     enabled_set: frozenset[str] | None
@@ -1275,6 +1300,11 @@ def _secret_exposure_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
                 f"rules[{index}].severity_overrides[{key!r}]={value!r} is not a severity"
             )
         overrides[str(key)] = value
+    unknown = set(overrides) - BUILTIN_RULE_IDS
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].severity_overrides has unknown ids {sorted(unknown)}"
+        )
 
     cfg = SecretSecurityConfig(
         enabled_rules=enabled_set,
@@ -1301,6 +1331,13 @@ def _dlp_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
         DlpSecurityConfig,
         as_authorize_rule,
     )
+    from snagline.secret_security import BUILTIN_RULE_IDS as SECRET_BUILTIN_RULE_IDS
+
+    # scan_text synthesizes ``secret:<id>`` rule ids from secret_security when
+    # include_secrets is true, so those ids are valid here alongside the dlp builtins.
+    valid_ids = BUILTIN_DLP_RULE_IDS | {
+        f"secret:{sid}" for sid in SECRET_BUILTIN_RULE_IDS
+    }
 
     allowed = {
         "type",
@@ -1339,6 +1376,11 @@ def _dlp_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
     disabled = raw.get("disabled_rules", [])
     if not isinstance(disabled, list) or not all(isinstance(v, str) for v in disabled):
         raise PolicyError(f"rules[{index}].disabled_rules must be a list of strings")
+    unknown = set(disabled) - valid_ids
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].disabled_rules has unknown ids {sorted(unknown)}"
+        )
 
     enabled = raw.get("enabled_rules")
     enabled_set: frozenset[str] | None
@@ -1364,6 +1406,11 @@ def _dlp_rule_from_dict(raw: Mapping[str, Any], index: int) -> Rule:
                 f"rules[{index}].severity_overrides[{key!r}]={value!r} is not a severity"
             )
         overrides[str(key)] = value
+    unknown = set(overrides) - valid_ids
+    if unknown:
+        raise PolicyError(
+            f"rules[{index}].severity_overrides has unknown ids {sorted(unknown)}"
+        )
 
     cfg = DlpSecurityConfig(
         enabled_rules=enabled_set,
