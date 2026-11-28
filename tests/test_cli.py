@@ -6,6 +6,7 @@ import dataclasses
 import io
 import json
 from argparse import Namespace
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -506,6 +507,8 @@ def test_validate_policy_valid_file_cli(capsys, tmp_path):
     assert rc == 0
     out = capsys.readouterr().out
     assert "Policy 'my_policy' (v1.0) is valid." in out
+
+
 def test_main_hook_forwards_intent_to_out(tmp_path, monkeypatch):
     """Issue #763: `_event_to_json` enumerated the StepEvent fields by hand and
     was never updated when intent landed in #603, so an event ingested with an
@@ -551,3 +554,44 @@ def test_event_to_json_covers_every_step_event_field():
     )
     serialized = _event_to_json(event)
     assert set(serialized) == {f.name for f in dataclasses.fields(StepEvent)}
+
+
+@pytest.mark.parametrize(
+    ("agent_id", "decision", "exit_code"),
+    [
+        ("worker", "deny", 2),
+        ("reviewer", "ask", 1),
+        ("other", "allow", 0),
+        (None, "allow", 0),
+    ],
+)
+def test_eval_applies_agent_scoped_policy(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    agent_id: str | None,
+    decision: str,
+    exit_code: int,
+) -> None:
+    """The CLI must pass the selected agent through to real policy evaluation."""
+    policy = tmp_path / "policy.json"
+    policy.write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "default_decision": "allow",
+                "agent_rules": {
+                    "worker": {"denied_tools": ["Read"]},
+                    "reviewer": {"ask_tools": ["Read"]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = ["eval", "--tool", "Read", "--policy", str(policy), "--json"]
+    if agent_id is not None:
+        args.extend(["--agent-id", agent_id])
+
+    assert main(args) == exit_code
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out)["decision"] == decision

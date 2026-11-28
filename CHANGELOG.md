@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `snagline eval` now accepts `--agent-id` and applies matching per-agent policy
+  rules during offline evaluation (#812).
 - `WebhookSink` and `ConsoleSink` now include the risk's explicit or derived
   severity in their JSON payloads (#772).
 - `DiagnosticMetrics.record_timing` rejects negative and non-finite samples

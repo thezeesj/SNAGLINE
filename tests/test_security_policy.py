@@ -189,6 +189,8 @@ def test_agent_list_conflicts_with_global_list_still_valid():
     }
     schema = validate_policy_dict(raw)
     assert schema.agent_rules["researcher"].allowed_tools == ["Bash"]
+
+
 def test_compile_policy_enforces_allowed_roots():
     raw = {
         "version": "1.0",
@@ -221,6 +223,8 @@ def test_compile_policy_without_allowed_roots_leaves_paths_unconfined():
     policy = compile_policy(validate_policy_dict(raw))
     outside = ToolRequest.from_tool_input("Read", {"file_path": "/etc/passwd"})
     assert policy.decide(outside).decision == "allow"
+
+
 def test_yaml_policy_without_pyyaml_raises_clear_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -276,6 +280,8 @@ def test_yaml_policy_loads_when_pyyaml_available() -> None:
     assert schema.allowed_tools == ["Read", "Grep"]
     assert "untrusted_subagent" in schema.agent_rules
     assert schema.agent_rules["untrusted_subagent"].denied_tools == ["Bash"]
+
+
 def test_load_security_policy_missing_file_raises_filenotfound(tmp_path: Path):
     missing_path = tmp_path / "non_existent_policy.yaml"
     with pytest.raises(FileNotFoundError, match="Security policy file not found"):

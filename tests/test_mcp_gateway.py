@@ -104,6 +104,8 @@ def test_mcp_gateway_path_security_confinement():
         res = gw.evaluate(name, args)
         assert res["decision"] == "deny", f"expected {name} to be denied"
         assert res["allowed"] is False
+
+
 def test_mcp_gateway_denies_agent_scoped_rule():
     """Issue #765: the gateway accepted agent_id but dropped it before the
     policy verdict, so agent_rules never matched -- a tool denied for a
