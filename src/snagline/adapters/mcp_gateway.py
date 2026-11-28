@@ -118,6 +118,7 @@ class McpSecurityGateway:
                 action=tool_req.action,
                 resource=tool_req.resource,
                 tool_input=tool_req.tool_input,
+                agent_id=tool_req.agent_id,
                 policy=self.policy,
                 policy_path=self.policy_path,
                 scoring_engine=self.scoring_engine,

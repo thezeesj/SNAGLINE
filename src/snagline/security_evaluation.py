@@ -41,6 +41,7 @@ def evaluate_request(
     action: str = "unknown",
     resource: str | None = None,
     tool_input: Mapping[str, Any] | None = None,
+    agent_id: str | None = None,
     policy: Policy | None = None,
     policy_path: str | Path | None = None,
     scoring_engine: SecurityScoringEngine | None = None,
@@ -133,6 +134,7 @@ def evaluate_request(
         action=action,
         resource=res_str,
         tool_input=input_map,
+        agent_id=agent_id,
     )
     verdict = active_policy.decide(request)
 

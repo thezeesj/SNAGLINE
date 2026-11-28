@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from snagline.authorize import Policy, allow_agent_tools
 from snagline.cli import main
 from snagline.security_evaluation import evaluate_request
 
@@ -142,3 +143,22 @@ def test_cli_validate_policy_subcommand(tmp_path: Path, capsys):
     assert ret == 0
     captured = capsys.readouterr()
     assert "valid" in captured.out.lower()
+
+
+def test_evaluate_request_forwards_agent_id_to_policy_rules():
+    # Issue #765: evaluate_request built ToolRequest without agent_id, so
+    # agent-scoped rules never matched -- a per-agent allowlist (or denial)
+    # was silently ignored and the call fell through to default_decision.
+    policy = Policy(
+        rules=(allow_agent_tools({"researcher": ["Read"]}),),
+        default_decision="allow",
+    )
+    denied = evaluate_request(
+        tool_name="reindex_cluster", agent_id="researcher", policy=policy
+    )
+    assert denied["decision"] == "deny"
+    allowed = evaluate_request(tool_name="Read", agent_id="researcher", policy=policy)
+    assert allowed["decision"] == "allow"
+    # Without an agent_id the agent rule has no opinion, so the default holds.
+    unscoped = evaluate_request(tool_name="reindex_cluster", policy=policy)
+    assert unscoped["decision"] == "allow"

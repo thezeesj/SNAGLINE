@@ -104,3 +104,37 @@ def test_mcp_gateway_path_security_confinement():
         res = gw.evaluate(name, args)
         assert res["decision"] == "deny", f"expected {name} to be denied"
         assert res["allowed"] is False
+def test_mcp_gateway_denies_agent_scoped_rule():
+    """Issue #765: the gateway accepted agent_id but dropped it before the
+    policy verdict, so agent_rules never matched -- a tool denied for a
+    specific agent was still allowed under a permissive default_decision."""
+    from snagline.security_policy import compile_policy, validate_policy_dict
+
+    policy = compile_policy(
+        validate_policy_dict(
+            {
+                "version": "1.0",
+                "name": "agent-scope",
+                "default_decision": "allow",
+                "agent_rules": {
+                    "untrusted": {"denied_tools": ["dangerous_tool"]},
+                },
+            }
+        )
+    )
+    gateway = McpSecurityGateway(policy=policy)
+
+    denied = gateway.evaluate("dangerous_tool", {"param": "val"}, agent_id="untrusted")
+    assert denied["decision"] == "deny"
+    assert denied["allowed"] is False
+    assert "agent" in denied["reason"].lower()
+
+    # An agent the rule does not name, and a call with no agent_id at all,
+    # keep falling through to the permissive default.
+    assert (
+        gateway.evaluate("dangerous_tool", {"param": "val"}, agent_id="trusted")[
+            "decision"
+        ]
+        == "allow"
+    )
+    assert gateway.evaluate("dangerous_tool", {"param": "val"})["decision"] == "allow"
