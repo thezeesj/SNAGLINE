@@ -396,6 +396,9 @@ def test_hook_cli_round_trips_metadata_to_the_out_file(tmp_path) -> None:
     r = _run(["hook", "--out", str(out)], json.dumps(_canonical_compaction("c1")))
     assert r.returncode == 0
     lines = [json.loads(line) for line in out.read_text().splitlines()]
+    # The full 14-field shape (issue #763 added intent; #226 added
+    # side_effect/metadata before it): a missing key here is a field the
+    # bridge silently drops on the way out.
     assert lines == [
         {
             "step_id": "c1",
@@ -411,6 +414,7 @@ def test_hook_cli_round_trips_metadata_to_the_out_file(tmp_path) -> None:
             "tokens_out": None,
             "side_effect": False,
             "metadata": {"pinned": [_PIN_A]},
+            "intent": None,
         }
     ]
 

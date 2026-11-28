@@ -785,7 +785,9 @@ def _cmd_watch(args: argparse.Namespace) -> int:
 
 
 # Required positional fields and complete field set for StepEvent (issue #620).
-# Mirrors the 13 fields round-tripped losslessly by _event_to_json below.
+# Mirrors the fields round-tripped losslessly by _event_to_json below; both
+# derive from dataclasses.fields, so a new field cannot drift between them
+# again the way intent did (issue #763).
 _REQUIRED_EVENT_FIELDS: frozenset[str] = frozenset(
     f.name
     for f in dataclasses.fields(StepEvent)
@@ -880,13 +882,16 @@ def _cmd_hook(args: argparse.Namespace) -> int:
 
 
 def _event_to_json(event: StepEvent) -> dict:
-    # All 13 StepEvent fields, so the hook bridge round-trips losslessly.
+    # All 14 StepEvent fields, so the hook bridge round-trips losslessly.
     # ``side_effect`` and ``metadata`` were previously dropped, which made
     # SideEffectGuardDetector and CompactionTripwireDetector structurally
     # unreachable over `snagline hook --out/--url` (issue #226). ``metadata``
     # is host-provided: whatever the host emits in its payload is what lands
     # in the --out file or the POST body (documented privacy posture -- the
-    # bridge never adds content, it just stops subtracting).
+    # bridge never adds content, it just stops subtracting). ``intent`` went
+    # the same way when it was added (issue #603): the bridge already accepts
+    # it on the way in, but dropping it on the way out made GoalDriftDetector
+    # unreachable over `--out/--url` too (issue #763).
     return {
         "step_id": event.step_id,
         "episode_id": event.episode_id,
@@ -901,6 +906,7 @@ def _event_to_json(event: StepEvent) -> dict:
         "tokens_out": event.tokens_out,
         "side_effect": event.side_effect,
         "metadata": event.metadata,
+        "intent": event.intent,
     }
 
 
