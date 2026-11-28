@@ -126,6 +126,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authorize integration already used, and deduplicates by
   `(rule_id, secret_signature)` so a secret present in both the resource and
   `tool_input` is reported and scored once, not twice (#752).
+- `SecurityScoringEngine.evaluate()` now reads the `action` it was already
+  passed. The base-sensitivity lookup keyed solely on the tool name, so the six
+  action-word entries in `DEFAULT_TOOL_SENSITIVITIES` (`write`, `edit`, `patch`,
+  `delete`, `rm`, `read`) could fire only for a tool literally named that. A
+  mutating tool with an unrecognized name -- `cleanup_files` with
+  `action="delete"` -- scored the 25.0 unknown-tool baseline, identical to an
+  unrecognized reader, even though the caller told the engine what the tool
+  does. When the tool name has no entry, the engine now falls back to the
+  action-word sensitivity before the unknown-tool baseline; the name still wins
+  where it has its own entry (#753).
 
 ### Added
 - Added optional `intent: str | None = None` field to `StepEvent` and the `raw`
