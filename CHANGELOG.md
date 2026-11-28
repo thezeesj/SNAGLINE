@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `observe_openai_call` and `observe_anthropic_call` now accept and forward
+  host-declared `intent` to `StepEvent`, matching the raw adapter. The default
+  remains `None` for existing callers (#773).
 - `snagline eval` now accepts `--agent-id` and applies matching per-agent policy
   rules during offline evaluation (#812).
 - Alert sinks reject invalid `min_severity` values at construction with a

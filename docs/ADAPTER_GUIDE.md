@@ -94,6 +94,10 @@ runtimes, route the marked action through the raw adapter or an
 `observe_*` helper that takes an explicit `side_effect=True`. This
 limitation is intentional and documented.
 
+The explicit SDK helpers `observe_openai_call` and `observe_anthropic_call`
+accept `intent="..."` to forward host-declared step intent to `StepEvent`.
+Omitting it preserves the default `None`.
+
 ## Optional: compaction tripwire events (issue #90)
 
 If your harness exposes compaction hooks (LangGraph pre-compaction callbacks,

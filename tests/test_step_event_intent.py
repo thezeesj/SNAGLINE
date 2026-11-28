@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from snagline.adapters.anthropic import observe_anthropic_call
+from snagline.adapters.openai import observe_openai_call
 from snagline.adapters.raw import watch
 from snagline.events import StepEvent, make_signature
 
@@ -55,6 +59,19 @@ def test_raw_adapter_passes_intent_through():
     assert read.intent is None
     assert research.intent == "research financial records"
     assert [e.intent for e in mon.events] == [None, "research financial records"]
+
+
+@pytest.mark.parametrize(
+    ("observe", "model"),
+    [(observe_openai_call, "gpt-4o"), (observe_anthropic_call, "claude-3-5-sonnet")],
+)
+def test_sdk_observe_passes_intent_through(observe, model):
+    mon = _RecordingMonitor()
+    plain = observe(mon, episode_id="ep", model=model)
+    declared = observe(mon, episode_id="ep", model=model, intent="search records")
+    assert plain.intent is None
+    assert declared.intent == "search records"
+    assert mon.events == [plain, declared]
 
 
 def test_signature_helper_ignores_intent():

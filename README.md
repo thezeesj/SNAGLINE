@@ -506,6 +506,10 @@ SNAGLINE plugs into agent frameworks without becoming one. Six adapters ship in 
 
 Each adapter translates framework-specific events into `StepEvent`s and calls `monitor.ingest()`. None of them contain detection logic.
 
+The explicit OpenAI and Anthropic SDK helpers, `observe_openai_call` and
+`observe_anthropic_call`, also accept an optional `intent` keyword for
+host-declared step intent; it defaults to `None`.
+
 ### Raw loop adapter (the default)
 
 ```python

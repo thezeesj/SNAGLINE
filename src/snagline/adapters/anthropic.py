@@ -110,7 +110,9 @@ def observe_anthropic_call(
     result: Any | None = None,
     step_id: str | None = None,
     side_effect: bool = False,
+    intent: str | None = None,
 ) -> StepEvent:
+    """Observe an Anthropic call; ``intent`` optionally declares the host's intent."""
     sig_text = str(messages or "")
     sig = make_signature("tool_call", model or "anthropic", sig_text)
     tokens_in, tokens_out = (None, None)
@@ -130,6 +132,7 @@ def observe_anthropic_call(
         tokens_out=tokens_out,
         metadata={"adapter": "anthropic"},
         side_effect=side_effect,
+        intent=intent,
     )
     with contextlib.suppress(Exception):
         monitor.ingest(event)
