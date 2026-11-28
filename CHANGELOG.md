@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `snagline eval` now accepts `--agent-id` and applies matching per-agent policy
+  rules during offline evaluation (#812).
 - Alert sinks reject invalid `min_severity` values at construction with a
   `ValueError` listing the supported levels (#815).
 - `WebhookSink` and `ConsoleSink` now include the risk's explicit or derived

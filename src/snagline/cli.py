@@ -634,6 +634,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--resource", default=None, help="Resource target (command string, path, url)."
     )
     p_eval.add_argument(
+        "--agent-id",
+        default=None,
+        help="Agent identifier for agent-scoped policy rules.",
+    )
+    p_eval.add_argument(
         "--policy", default=None, help="Path to a security policy YAML/JSON file."
     )
     p_eval.add_argument(
@@ -1690,6 +1695,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             tool_name=args.tool,
             action=args.action,
             resource=args.resource,
+            agent_id=args.agent_id,
             policy_path=args.policy,
         )
     except Exception as err:

@@ -12,7 +12,13 @@ snagline eval --tool Bash --action execute --resource "cat /etc/passwd"
 
 # Evaluate with custom policy and JSON output
 snagline eval --tool Read --action read --resource "src/main.py" --policy policy.yaml --json
+
+# Include the agent identity when evaluating agent-scoped policy rules
+snagline eval --tool Read --agent-id worker --policy policy.yaml --json
 ```
+
+`--agent-id` selects the matching `agent_rules` in the policy. When omitted,
+no agent identity is supplied, so agent-scoped rules do not match.
 
 **JSON Output Format:**
 ```json
