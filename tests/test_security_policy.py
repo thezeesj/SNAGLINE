@@ -188,3 +188,35 @@ def test_agent_list_conflicts_with_global_list_still_valid():
     }
     schema = validate_policy_dict(raw)
     assert schema.agent_rules["researcher"].allowed_tools == ["Bash"]
+def test_compile_policy_enforces_allowed_roots():
+    raw = {
+        "version": "1.0",
+        "name": "roots",
+        "default_decision": "allow",
+        "allowed_tools": ["Read"],
+        "allowed_roots": ["/var/data"],
+    }
+    policy = compile_policy(validate_policy_dict(raw))
+
+    # A read inside the only configured root is allowed by the tool rule
+    inside = ToolRequest.from_tool_input("Read", {"file_path": "/var/data/notes.txt"})
+    assert policy.decide(inside).decision == "allow"
+
+    # ... the same read escaping it is confined by the path rule, not by the
+    # tool lists, so default_decision="allow" cannot paper over the escape.
+    outside = ToolRequest.from_tool_input("Read", {"file_path": "/etc/passwd"})
+    verdict = policy.decide(outside)
+    assert verdict.decision == "deny"
+    assert "allowed_roots" in verdict.reason
+
+
+def test_compile_policy_without_allowed_roots_leaves_paths_unconfined():
+    raw = {
+        "version": "1.0",
+        "name": "no_roots",
+        "default_decision": "allow",
+        "allowed_tools": ["Read"],
+    }
+    policy = compile_policy(validate_policy_dict(raw))
+    outside = ToolRequest.from_tool_input("Read", {"file_path": "/etc/passwd"})
+    assert policy.decide(outside).decision == "allow"
