@@ -728,6 +728,9 @@ from snagline import Monitor, StepEvent, FailureRisk, Config, make_signature, wa
 | `snagline watch --sink webhook --webhook-url URL` | Live stdin mode |
 | `snagline watch --follow --file events.jsonl --heartbeat /var/run/snagline/hb` | Tail a file and leave liveness evidence an external supervisor can watch |
 | `snagline hook --url URL` | Command bridge (always exits 0) |
+| `snagline baseline run.jsonl --store-dir DIR --tenant acme` | Fit a healthy-run baseline (per-tool latency/error profile) and store it in a versioned, per-tenant store; `--list-versions` lists it, and `snagline baseline retrain --windows-dir DIR` refits from the newest window and atomically bumps the store pointer |
+| `snagline eval --tool Bash --action execute --resource "rm -rf /"` | Offline evaluation of a proposed tool request against the security policies (inspectors, policy verdict, risk score) |
+| `snagline validate-policy policy.json` | Validate a security policy file against the schema before deploying it (issue #647) |
 
 Every command handles errors gracefully. `snagline hook` always exits 0 (fail-open by construction). `snagline watch` skips malformed lines and reports a summary.
 
