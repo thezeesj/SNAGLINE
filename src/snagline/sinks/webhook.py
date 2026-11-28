@@ -48,6 +48,7 @@ from snagline.sinks.base import (
     describe_failure,
     make_post_pool,
     redacted_destination,
+    validate_min_severity,
 )
 
 logger = logging.getLogger("snagline")
@@ -74,6 +75,7 @@ class WebhookSink:
     ) -> None:
         self._url = url
         self._timeout = timeout
+        validate_min_severity(min_severity)
         self._min = min_severity
         # A private in-flight pool: a dead webhook must only exhaust its own
         # delivery budget, not the one every other network sink draws from

@@ -27,7 +27,12 @@ import urllib.request
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from snagline.risk import FailureRisk
+from snagline.risk import (
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+    FailureRisk,
+)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -68,6 +73,15 @@ class AlertSink(Protocol):
     def emit(self, risk: FailureRisk) -> None:
         """Emit one risk. Must be fire-and-forget and never block ingest()."""
         ...
+
+
+def validate_min_severity(min_severity: str | None) -> None:
+    """Validate an optional sink severity threshold."""
+    levels = (SEVERITY_INFO, SEVERITY_WARNING, SEVERITY_CRITICAL)
+    if min_severity is not None and min_severity not in levels:
+        raise ValueError(
+            f"invalid min_severity {min_severity!r}; must be one of {sorted(levels)}"
+        )
 
 
 def format_sink_repr(type_name: str, **fields: object) -> str:
